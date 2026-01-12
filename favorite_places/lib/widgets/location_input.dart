@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:http/http.dart' as http;
 
 import 'package:favorite_places/models/place.dart';
 import 'package:flutter/material.dart';
 import 'package:location/location.dart';
-import 'package:http/http.dart' as http;
+import 'package:favorite_places/screens/map.dart';
+import 'package:latlong2/latlong.dart';
 
 class LocationInput extends StatefulWidget {
   const LocationInput({super.key, required this.onSelectLocation});
@@ -43,6 +45,40 @@ class _LocationInputState extends State<LocationInput> {
     return ((lon + 180) / 360 * pow(2, zoom)).floor();
   }
 
+  Future<void> _savePlace(double latitude, double longitude) async {
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$latitude&lon=$longitude',
+      );
+      final response = await http.get(
+        url,
+        headers: {'User-Agent': 'favorite_places_app/1.0'},
+      );
+      final resData = json.decode(response.body);
+      final address = resData['display_name'];
+
+      setState(() {
+        _pickedLocation = PlaceLocation(
+          latitude: latitude,
+          longitude: longitude,
+          address: address,
+        );
+        _isGettingLocation = false;
+      });
+
+      widget.onSelectLocation(_pickedLocation!);
+    } catch (error) {
+      setState(() {
+        _isGettingLocation = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to get address: $error')),
+        );
+      }
+    }
+  }
+
   void _getCurrentLocation() async {
     Location location = Location();
 
@@ -78,26 +114,23 @@ class _LocationInputState extends State<LocationInput> {
       return;
     }
 
-    final url = Uri.parse(
-      'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${locationData.latitude}&lon=${locationData.longitude}',
-    );
-    final response = await http.get(
-      url,
-      headers: {'User-Agent': 'favorite_places_app/1.0'},
-    );
-    final resData = json.decode(response.body);
-    final address = resData['display_name'];
+    _savePlace(lat, lon);
+  }
+
+  void _selectOnMap() async {
+    final selectedLocation = await Navigator.of(
+      context,
+    ).push<LatLng>(MaterialPageRoute(builder: (ctx) => const MapScreen()));
+
+    if (selectedLocation == null) {
+      return;
+    }
 
     setState(() {
-      _pickedLocation = PlaceLocation(
-        latitude: lat!,
-        longitude: lon!,
-        address: address,
-      );
-      _isGettingLocation = false;
+      _isGettingLocation = true;
     });
 
-    widget.onSelectLocation(_pickedLocation!);
+    await _savePlace(selectedLocation.latitude, selectedLocation.longitude);
   }
 
   @override
@@ -148,7 +181,7 @@ class _LocationInputState extends State<LocationInput> {
             TextButton.icon(
               icon: const Icon(Icons.map),
               label: const Text('Select on Map'),
-              onPressed: () {},
+              onPressed: _selectOnMap,
             ),
           ],
         ),
